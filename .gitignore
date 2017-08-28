@@ -2,6 +2,7 @@
 *.mdb
 *.ldb
 *.db
+*.sdf
 Debug/
 Release/
 Obj/
