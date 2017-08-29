@@ -11,6 +11,7 @@
 
 #include "IPointProcessor.h"
 #include "../Utils/GeometryUtils.h"
+#include "../Utils/defines.h"
 
 namespace leaf
 {
@@ -27,25 +28,48 @@ namespace leaf
 		// Decompose the leaf polygon into triangles.
 		std::vector<std::tuple<double_t, double_t, double_t>> triangles;
 
-		PointProcessor *auxin, *veinNodes;
+		class WrappedProcessor : PointProcessor
+		{
+		public:
+			std::vector<DataType> rawData;
+			virtual void insert(const DataType &a)
+			{
+				PointProcessor::insert(a);
+				rawData.push_back(a);
+			}
+			void rebuild()
+			{
+				PointProcessor::rebuild(rawData);
+			}
+		};
+		WrappedProcessor *auxin, *veinNodes;
 		
 		// maintain the connection relationship of vein nodes.
-		boost::adjacency_list<boost::listS, boost::vecS, boost::directedS> veinTopology;
+		boost::adjacency_list<boost::listS, boost::vecS, boost::bidirectionalS> veinTopology;
 		
+		// For generating closed patterns, serveral veins may grow to the same auxin source. 
+		// We use this vector to save the correspondence from auxin node index to vein node index.
+		std::vector<int32_t> auxinNode2VeinIndex;
+
 		// maintain the mininum distance from every vein node to the base of the leaf.
-		vector<double> minDistToBase;
+		vector<double_t> minDistToBase;
 
 	public:
 		LeafSimulation()
 		{
-			auxin = new PointProcessor<DataType>();
-			veinNodes = new PointProcessor<DataType>();
+			auxin = new WrappedProcessor<DataType>();
+			veinNodes = new WrappedProcessor<DataType>();
 		}
 
 		~LeafSimulation()
 		{
 			delete auxin;
 			delete veinNodes;
+		}
+
+		void readyForSimulation()
+		{
+			auxinNode2VeinIndex.clear();
 		}
 
 		// expand the vein for one step.
@@ -66,11 +90,11 @@ namespace leaf
 			static std::vector<double_t> areas;
 			areas.clear();
 			areas.reserve(triangles.size());
-			for (auto i = triangles.begin(); i != triangles.end(); ++i)
+			FOR_EACH(i, triangles)
 			{
 				areas.push_back(abs(utils::crossProduct(*i)) + *(areas.end() - 1));
 			}
-			for (auto i = areas.begin(); i != areas.end(); ++i)
+			FOR_EACH(i, areas)
 				*i /= *(areas.end() - 1);
 			
 			// Generate auxins by picking a point randomly in the polygon and checking 
@@ -96,19 +120,91 @@ namespace leaf
 					generated++;
 				}
 			}
+			auxinNode2VeinIndex.resize(auxin->rawData.size(), -1);
 
 			// For every vein node, get all auxin nodes that controls it.
-			static std::vector<std::vector<DataType>> controlledBy;
-			controlledBy.resize(veinNodes->rawData().size());
+			static std::vector<std::vector<std::tuple<uint32_t, DataType>>> controlledBy;
+			controlledBy.resize(veinNodes->rawData.size());
 			for (auto i = controlledBy.begin(); i != controlledBy.end(); ++i)
 				i->clear();
-			for (auto i = auxin->rawData().begin(); i != auxin->rawData().end(); ++i)
+			uint32_t index = 0;
+			FOR_EACH(i, auxin->rawData)
 			{
-				auto controls = veinNodes->getRelativeNeighborByIndex(i);
-				for (auto j = controls.begin(); j != controls.end(); ++j)
-					controlledBy[*j].push_back(*i);
+				auto controls = veinNodes->getRelativeNeighborByIndex(*i);
+				if (auxinNode2VeinIndex[index] == -1)
+					for (auto j = controls.begin(); j != controls.end(); ++j)
+						controlledBy[*j].push_back(std::make_tuple(index, *i));
+				else
+				{
+					// We should consider the situation, that the segments of veins rather than
+					// nodes of veins intersect with the forbidden area.
+					// So first we find all the vein nodes that connect to the one that coincides
+					// with current auxin node.
+					static std::vector<DataType> neighbor;
+					auto iter = boost::in_edges(auxinNode2VeinIndex[index], veinTopology);
+					for (; iter.first != iter.second; ++iter.first)
+						neighbor.push_back(veinNodes->rawData[boost::get(boost::vertex_index, veinTopology, *iter)]);
+					for (auto j = controls.begin(); j != controls.end(); ++j)
+					{
+						//                         . <- auxin node
+						//                        /|
+						//                       / |
+						//                      /  |
+						//                     /   |
+						// added vein nodes-> .    . <- node to be checked
+						// Then, we check the angle. If it's less than pi, then the auxin node 
+						// can't control the checking node.
+						bool flag = true;
+						for (auto k = neighbor.begin(); k != neighbor.end(); ++k)
+							if (utils::dotProduct(*i, *j, *k) > 0)
+							{
+								flag = false;
+								break;
+							}
+						if (flag)
+							controlledBy[*j].push_back(std::make_tuple(indes, *i));
+					}
+				}	
 			}
-
+			
+			// Calculate the growing direction and grow.
+			auto veinSize = veinNodes->rawData.size();
+			for (int i = 0; i < veinSize; ++i)
+			{
+				DataType &curVein = veinNodes->rawData[i];
+				DataType direction;
+				double_t nearest = 1e+8;
+				uint32_t nearestIndex = 0;
+				DataType nearestP;
+				FOR_EACH(controlledBy, j)
+				{
+					auto delta = std::get<1>(*j) - curVein;
+					double_t distance = utils::length(delta);
+					delta /= distance;
+					direction += delta * exp(-distance * auxinAttenuation);
+					if (distance < nearest)
+					{
+						nearest = distance;
+						nearestIndex = std::get<0>(*j);
+						nearestP = std::get<1>(*j);
+					}
+				}
+				// if an auxin node is reachable in one step, then just reach it. 
+				if (nearest < stepSize)
+				{
+					// Several veins may grow to the same auxin node.
+					int32_t &veinIndex = auxinNode2VeinIndex[nearestIndex];
+					if (veinIndex == -1)
+					{
+						veinIndex = veinNodes->rawData.size();
+						veinNodes->insert(nearestP);
+					}
+					boost::add_edge(i, veinIndex, veinTopology);
+				}
+				direction = utils::normalize(direction) * stepSize;
+				boost::add_edge(i, veinNodes->rawData.size(), veinTopology);
+				veinNodes->insert(curVein + direction);
+			}
 		}
 	};
 }

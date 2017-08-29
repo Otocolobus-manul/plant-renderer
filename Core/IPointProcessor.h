@@ -3,7 +3,7 @@
 
 namespace leaf
 {
-	template <typename DataType, typename RawType>
+	template <typename DataType>
 	class IPointProccessor
 	{
 		// Query functions.
@@ -12,9 +12,6 @@ namespace leaf
 
 		// Edit functions.
 		virtual void insert(const DataType &a) = 0;
-
-		// We could using rawData() to get all points, modify it, and rebuild the data structure.
-		virtual RawType& rawData() = 0;
-		virtual void rebuild() = 0;
+		virtual void rebuild(const std::vector<DataType> &a) = 0;
 	};
 }
