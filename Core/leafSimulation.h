@@ -36,12 +36,6 @@ namespace leaf
 		// Describes a polygon, and the first should be the base.
 		std::vector<edgeNode> edge;
 		
-		// So I decided to put this into veinGrow() function.
-		// The partial sum of auxin density on edge, being used by vein growing function 
-		// to generate random auxin nodes on the edge.
-		// TODO: this could be maintained by BST if it constitutes a performance bottleneck.
-		// std::vector<double_t> edgeAuxinPartialSum;
-
 		// Decompose the leaf polygon into triangles.
 		std::vector<std::tuple<double_t, double_t, double_t>> triangles;
 
@@ -111,42 +105,10 @@ namespace leaf
 			double_t bs, 
 			double_t bv)
 		{
-			// Generate edge auxins.
-			// Please refer to the following internal auxin generation process.
-			static std::vector<double_t> areas;
-			// TODO: The following code should be deleted in the next submittion.
-			/*areas.clear();
-			areas.reserve(edgeAuxin.size());
-			int32_t index = 0;
-			FOR_EACH(i, edgeAuxin)
-			{
-				auto area = (*i + *(i + 1)) * utils::distance(edge[index], edge[index + 1]);
-				areas.push_back(area + (i == edgeAuxin.begin() ? 0 : *(areas.end() - 1)));
-				index++;
-			}
-			FOR_EACH(i, edgeAuxin)
-				*i /= *(areas.end() - 1);
-			static std::uniform_real_distribution<double_t> unif(0.0, 1.0);
-			static std::default_random_engine re;
-			for (uint32_t generated = 0, i = 0; generated < edgeAuxins && i < edgeAuxins * 5; ++i)
-			{
-				auto randSegment = unif(re);
-				auto picked = std::lower_bound(areas.begin(), areas.end(), randSegment);
-				double_t r = unif(re), low_ = edgeAuxin[picked], high_ = edgeAuxin[picked + 1];
-				double_t low = 2 * low_ / (low_ + high_), delta = 2 * (high_ - low_) / (low_ + high_);
-				r = low * r + 0.5 * delta * r * r;
-				DataType p = shape[picked + 1] * r + shape[picked] * (1 - r);
-				if (utils::distance(auxin->getNearest(p), p) > bs &&
-					utils::distance(veinNodes->getNearest(p), p) > bv)
-				{
-					auxin->insert(p);
-					generated++;
-				}
-			}*/
-
 			// Generate internal auxins.
 			// First calculate the area of the polygon triangles 
 			// so that random auxin nodes could be distributed evenly.
+			static std::vector<double_t> areas;
 			areas.clear();
 			areas.reserve(triangles.size());
 			FOR_EACH(i, triangles)
