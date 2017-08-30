@@ -17,7 +17,7 @@ namespace utils
 	}
 
 	template <typename T>
-	inlien double_t dotProduct(T a)
+	inline double_t dotProduct(T a)
 	{
 		return dotProduct(std::get<0>(a), std::get<1>(a), std::get<2>(a));
 	}

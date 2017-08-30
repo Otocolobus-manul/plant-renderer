@@ -21,13 +21,32 @@ namespace leaf
 		static_assert(std::is_base_of<IPointProccessor, PointProcessor>::value, "PointProcessor must be derived from IPointProcessor");
 
 	private:
-		// The shape of the leaf.
-		// Describes a polygon, and the index 0 point should be the base.
-		std::vector<DataType> shape;
+		// Data structure for saving information of a node on the boundry of the leaf.
+		struct edgeNode
+		{
+			// node position
+			DataType pos;
+			// density of auxin on the point
+			double_t auxinDensity;
+			// Auxin node index in WrappedProcessor *auxin.
+			// When leaf grows, we should also modify data used in veinGrow() function.
+			int32_t auxinNode;
+		};
+		// information of the edge of the leaf.
+		// Describes a polygon, and the first should be the base.
+		std::vector<edgeNode> edge;
 		
+		// So I decided to put this into veinGrow() function.
+		// The partial sum of auxin density on edge, being used by vein growing function 
+		// to generate random auxin nodes on the edge.
+		// TODO: this could be maintained by BST if it constitutes a performance bottleneck.
+		// std::vector<double_t> edgeAuxinPartialSum;
+
 		// Decompose the leaf polygon into triangles.
 		std::vector<std::tuple<double_t, double_t, double_t>> triangles;
 
+		// Wrapped point processor class.
+		// So we can get both unarranged data and arranged data.
 		class WrappedProcessor : PointProcessor
 		{
 		public:
@@ -74,6 +93,8 @@ namespace leaf
 
 		// expand the vein for one step.
 		// Parameters:
+		// edgeAuxins:       numbers of new auxin nodes generates on the edge of the leaf.
+		// innerAuxins:      numbers of new auxin nodes generates on the internal of the leaf.
 		// auxinGenerates:   numbers of new auxin nodes to be generated.
 		// stepSize:         how far should new vein nodes goes.
 		// auxinRadius:      the control radius of every auxin node.
@@ -81,18 +102,56 @@ namespace leaf
 		//                   attenuation function, i.e. auxin_strenth = e ^ (-distance * coefficient).
 		// bs:               the minimum distance the new auxin nodes should keep from other auxin nodes.
 		// bv:               the minimum distance the new auxin nodes should keep from other vein nodes.
-		void veinGrow(uint32_t auxinGenerates, double_t stepSize, double_t auxinRadius, 
-			double_t auxinAttenuation, double_t bs, double_t bv)
+		void veinGrow(
+			uint32_t edgeAuxins,
+			uint32_t innerAuxins, 
+			double_t stepSize, 
+			double_t auxinRadius, 
+			double_t auxinAttenuation, 
+			double_t bs, 
+			double_t bv)
 		{
-			// Generate auxins.
+			// Generate edge auxins.
+			// Please refer to the following internal auxin generation process.
+			static std::vector<double_t> areas;
+			// TODO: The following code should be deleted in the next submittion.
+			/*areas.clear();
+			areas.reserve(edgeAuxin.size());
+			int32_t index = 0;
+			FOR_EACH(i, edgeAuxin)
+			{
+				auto area = (*i + *(i + 1)) * utils::distance(edge[index], edge[index + 1]);
+				areas.push_back(area + (i == edgeAuxin.begin() ? 0 : *(areas.end() - 1)));
+				index++;
+			}
+			FOR_EACH(i, edgeAuxin)
+				*i /= *(areas.end() - 1);
+			static std::uniform_real_distribution<double_t> unif(0.0, 1.0);
+			static std::default_random_engine re;
+			for (uint32_t generated = 0, i = 0; generated < edgeAuxins && i < edgeAuxins * 5; ++i)
+			{
+				auto randSegment = unif(re);
+				auto picked = std::lower_bound(areas.begin(), areas.end(), randSegment);
+				double_t r = unif(re), low_ = edgeAuxin[picked], high_ = edgeAuxin[picked + 1];
+				double_t low = 2 * low_ / (low_ + high_), delta = 2 * (high_ - low_) / (low_ + high_);
+				r = low * r + 0.5 * delta * r * r;
+				DataType p = shape[picked + 1] * r + shape[picked] * (1 - r);
+				if (utils::distance(auxin->getNearest(p), p) > bs &&
+					utils::distance(veinNodes->getNearest(p), p) > bv)
+				{
+					auxin->insert(p);
+					generated++;
+				}
+			}*/
+
+			// Generate internal auxins.
 			// First calculate the area of the polygon triangles 
 			// so that random auxin nodes could be distributed evenly.
-			static std::vector<double_t> areas;
 			areas.clear();
 			areas.reserve(triangles.size());
 			FOR_EACH(i, triangles)
 			{
-				areas.push_back(abs(utils::crossProduct(*i)) + *(areas.end() - 1));
+				areas.push_back(abs(utils::crossProduct(*i)) + (i == triangles.begin() ? 0 : *(areas.end() - 1)));
 			}
 			FOR_EACH(i, areas)
 				*i /= *(areas.end() - 1);
@@ -100,9 +159,7 @@ namespace leaf
 			// Generate auxins by picking a point randomly in the polygon and checking 
 			// whether the point is legal.
 			// Because we don't want a dead loop, the total number of attemps is limited.
-			static std::uniform_real_distribution<double_t> unif(0.0, 1.0);
-			static std::default_random_engine re;
-			for (uint32_t generated = 0, i = 0; generated < auxinGenerates && i < auxinGenerates * 5; ++i)
+			for (uint32_t generated = 0, i = 0; generated < innerAuxins && i < innerAuxins * 5; ++i)
 			{
 				// We first randomly pick a triangle.
 				auto randTriangle = unif(re);
