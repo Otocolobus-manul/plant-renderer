@@ -41,11 +41,12 @@ namespace leaf
 
 		// Wrapped point processor class.
 		// So we can get both unarranged data and arranged data.
+		template <typename T>
 		class WrappedProcessor : PointProcessor
 		{
 		public:
-			std::vector<DataType> rawData;
-			virtual void insert(const DataType &a)
+			std::vector<T> rawData;
+			virtual void insert(const T &a)
 			{
 				PointProcessor::insert(a);
 				rawData.push_back(a);
@@ -55,7 +56,34 @@ namespace leaf
 				PointProcessor::rebuild(rawData);
 			}
 		};
-		WrappedProcessor *auxin, *veinNodes;
+
+		struct DataWithExtra : DataType
+		{
+			void* extra;
+			DataWithExtra(DataType data, void* extra) :
+				DataType(data), extra(extra)
+			{}
+			~DataWithExtra()
+			{
+				delete extra;
+			}
+		};
+		// Extra information for auxin nodes.
+		struct AuxinExtra
+		{
+			// auxin on the edge -> index in std::vector<edgeNode> edge;
+			//   not on the edge -> -1
+			int32_t edgeIndex;
+
+			// Strenth of the auxin node.
+			// All internal nodes have strenth = 1;
+			// We could change the strenth on the edge to modify how much 
+			// the veins tend to grow to the edge.
+			double_t strenth;
+		};
+
+		WrappedProcessor<DataWithExtra> *auxin;
+		WrappedProcessor<DataWithExtra> *veinNodes;
 		
 		// maintain the connection relationship of vein nodes.
 		boost::adjacency_list<boost::listS, boost::vecS, boost::bidirectionalS> veinTopology;
@@ -70,8 +98,8 @@ namespace leaf
 	public:
 		LeafSimulation()
 		{
-			auxin = new WrappedProcessor<DataType>();
-			veinNodes = new WrappedProcessor<DataType>();
+			auxin = new WrappedProcessor<DataWithExtra>();
+			veinNodes = new WrappedProcessor<DataWithExtra>();
 		}
 
 		~LeafSimulation()
@@ -96,6 +124,8 @@ namespace leaf
 		//                   attenuation function, i.e. auxin_strenth = e ^ (-distance * coefficient).
 		// bs:               the minimum distance the new auxin nodes should keep from other auxin nodes.
 		// bv:               the minimum distance the new auxin nodes should keep from other vein nodes.
+		// growToEdge:       returns the pairs of <vein node index, auxin node index> for vein nodes 
+		//                   growing to some auxin edge.
 		void veinGrow(
 			uint32_t edgeAuxins,
 			uint32_t innerAuxins, 
@@ -103,7 +133,8 @@ namespace leaf
 			double_t auxinRadius, 
 			double_t auxinAttenuation, 
 			double_t bs, 
-			double_t bv)
+			double_t bv,
+			std::vector<std::tuple<int32_t, int32_t>>& growToEdge)
 		{
 			// Generate internal auxins.
 			// First calculate the area of the polygon triangles 
@@ -135,14 +166,14 @@ namespace leaf
 				if (utils::distance(auxin->getNearest(p), p) > bs &&
 					utils::distance(veinNodes->getNearest(p), p) > bv)
 				{
-					auxin->insert(p);
+					auxin->insert(DataWithExtra(p, new AuxinExtra(){ edgeIndex = -1, veinNodes = 1.0 });
 					generated++;
 				}
 			}
 			auxinNode2VeinIndex.resize(auxin->rawData.size(), -1);
 
 			// For every vein node, get all auxin nodes that controls it.
-			static std::vector<std::vector<std::tuple<uint32_t, DataType>>> controlledBy;
+			static std::vector<std::vector<std::tuple<uint32_t, DataWithExtra>>> controlledBy;
 			controlledBy.resize(veinNodes->rawData.size());
 			for (auto i = controlledBy.begin(); i != controlledBy.end(); ++i)
 				i->clear();
@@ -159,7 +190,7 @@ namespace leaf
 					// nodes of veins intersect with the forbidden area.
 					// So first we find all the vein nodes that connect to the one that coincides
 					// with current auxin node.
-					static std::vector<DataType> neighbor;
+					static std::vector<DataWithExtra> neighbor;
 					auto iter = boost::in_edges(auxinNode2VeinIndex[index], veinTopology);
 					for (; iter.first != iter.second; ++iter.first)
 						neighbor.push_back(veinNodes->rawData[boost::get(boost::vertex_index, veinTopology, *iter)]);
@@ -181,7 +212,7 @@ namespace leaf
 								break;
 							}
 						if (flag)
-							controlledBy[*j].push_back(std::make_tuple(indes, *i));
+							controlledBy[*j].push_back(std::make_tuple(index, *i));
 					}
 				}	
 			}
@@ -190,16 +221,17 @@ namespace leaf
 			auto veinSize = veinNodes->rawData.size();
 			for (int i = 0; i < veinSize; ++i)
 			{
-				DataType &curVein = veinNodes->rawData[i];
-				DataType direction;
+				DataWithExtra &curVein = veinNodes->rawData[i];
+				DataWithExtra direction;
 				double_t nearest = 1e+8;
 				uint32_t nearestIndex = 0;
-				DataType nearestP;
+				DataWithExtra nearestP;
 				FOR_EACH(controlledBy, j)
 				{
 					auto delta = std::get<1>(*j) - curVein;
 					double_t distance = utils::length(delta);
 					delta /= distance;
+					delta *= ((AuxinExtra*)std::get<1>(*j).extra)->strenth;
 					direction += delta * exp(-distance * auxinAttenuation);
 					if (distance < nearest)
 					{
@@ -219,6 +251,11 @@ namespace leaf
 						veinNodes->insert(nearestP);
 					}
 					boost::add_edge(i, veinIndex, veinTopology);
+					
+					// Grow to the edge.
+					int32_t edgeIndex = ((AuxinExtra*)nearestP)->edgeIndex;
+					if (edgeIndex != -1)
+						growToEdge.push_back(std::make_tuple(veinIndex, edgeIndex));
 				}
 				direction = utils::normalize(direction) * stepSize;
 				boost::add_edge(i, veinNodes->rawData.size(), veinTopology);
