@@ -3,6 +3,7 @@
 *.ldb
 *.db
 *.sdf
+*.VC.opendb
 Debug/
 Release/
 Obj/

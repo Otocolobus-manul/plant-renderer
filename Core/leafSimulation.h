@@ -35,9 +35,10 @@ namespace leaf
 		// information of the edge of the leaf.
 		// Describes a polygon, and the first should be the base.
 		std::vector<edgeNode> edge;
-		
+
 		// Decompose the leaf polygon into triangles.
-		std::vector<std::tuple<double_t, double_t, double_t>> triangles;
+		// TODO: thiking about an algorithm to maintain this array.
+		std::vector<std::tuple<DataType, DataType, DataType>> triangles;
 
 		// Wrapped point processor class.
 		// So we can get both unarranged data and arranged data.
@@ -84,16 +85,16 @@ namespace leaf
 
 		WrappedProcessor<DataWithExtra> *auxin;
 		WrappedProcessor<DataWithExtra> *veinNodes;
-		
+
 		// maintain the connection relationship of vein nodes.
 		boost::adjacency_list<boost::listS, boost::vecS, boost::bidirectionalS> veinTopology;
-		
+
 		// For generating closed patterns, serveral veins may grow to the same auxin source. 
 		// We use this vector to save the correspondence from auxin node index to vein node index.
 		std::vector<int32_t> auxinNode2VeinIndex;
 
 		// maintain the mininum distance from every vein node to the base of the leaf.
-		vector<double_t> minDistToBase;
+		std::vector<double_t> minDistToBase;
 
 	public:
 		LeafSimulation()
@@ -128,11 +129,11 @@ namespace leaf
 		//                   growing to some auxin edge.
 		void veinGrow(
 			uint32_t edgeAuxins,
-			uint32_t innerAuxins, 
-			double_t stepSize, 
-			double_t auxinRadius, 
-			double_t auxinAttenuation, 
-			double_t bs, 
+			uint32_t innerAuxins,
+			double_t stepSize,
+			double_t auxinRadius,
+			double_t auxinAttenuation,
+			double_t bs,
 			double_t bv,
 			std::vector<std::tuple<int32_t, int32_t>>& growToEdge)
 		{
@@ -148,7 +149,7 @@ namespace leaf
 			}
 			FOR_EACH(i, areas)
 				*i /= *(areas.end() - 1);
-			
+
 			// Generate auxins by picking a point randomly in the polygon and checking 
 			// whether the point is legal.
 			// Because we don't want a dead loop, the total number of attemps is limited.
@@ -159,9 +160,9 @@ namespace leaf
 				auto picked = std::lower_bound(areas.begin(), areas.end(), randTriangle);
 				// Then generate a point inside the triangle.
 				double_t r1 = sqrt(unif(re)), r2 = unif(re);
-				DataType p = std::get<0>(picked) * (1 - r1) + 
-					         std::get<1>(picked) * (r1 * (1 - r2)) + 
-					         std::get<2>(picked) * (r1 * r2);
+				DataType p = std::get<0>(picked) * (1 - r1) +
+					std::get<1>(picked) * (r1 * (1 - r2)) +
+					std::get<2>(picked) * (r1 * r2);
 				// Check the legality of the generated point.
 				if (utils::distance(auxin->getNearest(p), p) > bs &&
 					utils::distance(veinNodes->getNearest(p), p) > bv)
@@ -214,9 +215,9 @@ namespace leaf
 						if (flag)
 							controlledBy[*j].push_back(std::make_tuple(index, *i));
 					}
-				}	
+				}
 			}
-			
+
 			// Calculate the growing direction and grow.
 			auto veinSize = veinNodes->rawData.size();
 			for (int i = 0; i < veinSize; ++i)
@@ -251,7 +252,7 @@ namespace leaf
 						veinNodes->insert(nearestP);
 					}
 					boost::add_edge(i, veinIndex, veinTopology);
-					
+
 					// Grow to the edge.
 					int32_t edgeIndex = ((AuxinExtra*)nearestP)->edgeIndex;
 					if (edgeIndex != -1)
@@ -261,6 +262,38 @@ namespace leaf
 				boost::add_edge(i, veinNodes->rawData.size(), veinTopology);
 				veinNodes->insert(curVein + direction);
 			}
+		}
+
+		// Grow the whole leaf evenly, that is, multiply all the point axises by factor.
+		void evenLeafGrow(double_t factor)
+		{
+			FOR_EACH(i, edge)
+				i->pos *= factor;
+			// TODO: maintain triangle vector.
+			FOR_EACH(i, auxin->rawData)
+				*i *= factor;
+			FOR_EACH(i, veinNodes->rawData)
+				*i *= factor;
+			FOR_EACH(i, minDistToBase)
+				*i *= factor:
+		}
+
+		// TO BE IMPLEMENTED.
+		void baselLeafGrow(double_t factor, double_t attenuation, double_t range)
+		{
+
+		}
+
+		void marginalGrow(double_t factor)
+		{
+
+		}
+
+		// Expand the boundary of the leaf for one step.
+		// 
+		void leafGrow()
+		{
+
 		}
 	};
 }
